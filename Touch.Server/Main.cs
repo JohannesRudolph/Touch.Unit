@@ -198,6 +198,7 @@ class SimpleListener
             proc.StartInfo.FileName = command;
             proc.StartInfo.Arguments = arguments;
             proc.StartInfo.UseShellExecute = false;
+            proc.StartInfo.RedirectStandardInput = true; // prevent from reading stdin in teamcity builds
             proc.StartInfo.RedirectStandardError = true;
             proc.StartInfo.RedirectStandardOutput = true;
             proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
