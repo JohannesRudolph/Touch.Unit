@@ -52,17 +52,19 @@ class SimpleListener
             // We might have stopped already, so just swallow any exceptions.
         }
     }
-    
-    public int Start(Action onStarted)
+
+    public void Start()
     {
-        bool processed;
-        
-        Console.WriteLine( "Touch.Unit Simple Server listening on: {0}:{1}", Address, Port );
         server = new TcpListener( Address, Port );
+        server.Start();
+        Console.WriteLine( "Touch.Unit Simple Server listening on: {0}:{1}", Address, Port );
+    }
+
+    public int ListenForTestRun()
+    {
+        bool processed = false;
         try
         {
-            server.Start();
-            onStarted();
             do
             {
                 using (TcpClient client = server.AcceptTcpClient ())
@@ -174,11 +176,20 @@ class SimpleListener
             else
                 listener.Port = 16384;
 
-            var listenerTask = Task.Factory.StartNew(
-                () => listener.Start(
-                    () => Task.Factory.StartNew(
-                        () => RunProcess(command, arguments, listener))));
+            listener.Start(); // we start the socket, but do not yet block on it 
+
+
+            var listenerTask = Task.Factory.StartNew(() => listener.ListenForTestRun());
+            var processTask = Task.Factory.StartNew(() => RunProcess(command, arguments, listener));
            
+            processTask.Wait();
+            bool success = listenerTask.Wait(TimeSpan.FromSeconds(2)); // we give the listener 2 more seconds to finish, after that we cancel it no matter what the process returned
+            if (!success)
+            {
+                Console.WriteLine ("Listener did not receive a connection or did not finnish processing in 2 seconds after process exited");
+                return 1;
+            }
+
            return listenerTask.Result;
         } catch (OptionException oe)
         {
@@ -213,10 +224,11 @@ class SimpleListener
             proc.BeginErrorReadLine();
             proc.BeginOutputReadLine();
             proc.WaitForExit();
-            
+
+            // cancel the listener task if the process failed
             if (proc.ExitCode != 0)
                 listener.Cancel();
-            
+
             return proc.ExitCode;
         }
     }
