@@ -24,6 +24,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 
 using Mono.Options;
 
@@ -52,7 +53,7 @@ class SimpleListener
         }
     }
     
-    public int Start()
+    public int Start(Action onStarted)
     {
         bool processed;
         
@@ -61,7 +62,7 @@ class SimpleListener
         try
         {
             server.Start();
-            
+            onStarted();
             do
             {
                 using (TcpClient client = server.AcceptTcpClient ())
@@ -153,6 +154,14 @@ class SimpleListener
                 return 0;
             }
 
+            // launch in background as we will block the main thread with the TCPListener
+            if (command == null || arguments == null)
+            {
+                Console.Write("command and arguments are required parameters");
+                return 1;
+            }
+
+
             var listener = new SimpleListener();
             
             IPAddress ip;
@@ -164,37 +173,13 @@ class SimpleListener
                 listener.Port = p;
             else
                 listener.Port = 16384;
-            
-            // launch in background as we will block the main thread with the TCPListener
-            if (command != null)
-            {
-                ThreadPool.QueueUserWorkItem( (v) => {
-                    using (Process proc = new Process ())
-                    {
-                        proc.StartInfo.FileName = command;
-                        proc.StartInfo.Arguments = arguments;
-                        proc.StartInfo.UseShellExecute = false;
-                        proc.StartInfo.RedirectStandardError = true;
-                        proc.StartInfo.RedirectStandardOutput = true;
-                        proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
-                        {
-                            Console.Error.WriteLine( "Command: " + e.Data );
-                        };
-                        proc.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
-                        {
-                            Console.WriteLine( "Command: " + e.Data );
-                        };
-                        proc.Start();
-                        proc.BeginErrorReadLine();
-                        proc.BeginOutputReadLine();
-                        proc.WaitForExit();
-                        if (proc.ExitCode != 0)
-                            listener.Cancel();
-                    }
-                });
-            }
 
-            return listener.Start();
+            var listenerTask = Task.Factory.StartNew(
+                () => listener.Start(
+                    () => Task.Factory.StartNew(
+                        () => RunProcess(command, arguments, listener))));
+           
+           return listenerTask.Result;
         } catch (OptionException oe)
         {
             Console.WriteLine( "{0} for options '{1}'", oe.Message, oe.OptionName );
@@ -205,4 +190,33 @@ class SimpleListener
             return 1;
         }
     }   
+
+    static int RunProcess(string command, string arguments, SimpleListener listener)
+    {
+        using (Process proc = new Process ())
+        {
+            proc.StartInfo.FileName = command;
+            proc.StartInfo.Arguments = arguments;
+            proc.StartInfo.UseShellExecute = false;
+            proc.StartInfo.RedirectStandardError = true;
+            proc.StartInfo.RedirectStandardOutput = true;
+            proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            {
+                Console.Error.WriteLine( "Command: " + e.Data );
+            };
+            proc.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            {
+                Console.WriteLine( "Command: " + e.Data );
+            };
+            proc.Start();
+            proc.BeginErrorReadLine();
+            proc.BeginOutputReadLine();
+            proc.WaitForExit();
+            
+            if (proc.ExitCode != 0)
+                listener.Cancel();
+            
+            return proc.ExitCode;
+        }
+    }
 }
