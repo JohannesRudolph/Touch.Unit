@@ -126,12 +126,14 @@ class SimpleListener {
 		string port = null;
 		string log_path = ".";
 		bool autoexit = true;
-		
+		string command = null;
+
 		var os = new OptionSet () {
 			{ "h|?|help", "Display help", v => help = true },
 			{ "ip", "IP address to listen (default: Any)", v => address = v },
 			{ "port", "TCP port to listen (default: 16384)", v => port = v },
 			{ "logpath", "Path to save the log files (default: .)", v => log_path = v },
+            { "command", "The command to execute", v => command = v },
 			{ "no-autoexit", "Don't exit the server once a test run has completed (default: false)", v => autoexit = false },
 		};
 		
@@ -155,6 +157,19 @@ class SimpleListener {
 			listener.LogPath = log_path ?? ".";
 			listener.AutoExit = autoexit;
 			
+            if (command != null) {
+                ThreadPool.QueueUserWorkItem ((v) => {
+                    using (Process proc = new Process ()) {
+                        proc.StartInfo.FileName = command;
+                        proc.Start ();
+                        proc.WaitForExit ();
+                        if (proc.ExitCode != 0)
+                            listener.Cancel ();
+                    }
+                });
+            }
+
+
 			return listener.Start ();
 		} catch (OptionException oe) {
 			Console.WriteLine ("{0} for options '{1}'", oe.Message, oe.OptionName);
