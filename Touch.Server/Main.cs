@@ -36,11 +36,15 @@ class SimpleListener
     IPAddress Address { get; set; }
 
     int Port { get; set; }
-    
+
+    bool canceled = false;
+
     public void Cancel()
     {
         try
         {
+            Console.WriteLine("Canceling the Server");
+            canceled = true;
             server.Stop();
         } catch
         {
@@ -67,7 +71,8 @@ class SimpleListener
             } while (!processed);
         } catch (Exception e)
         {
-            Console.WriteLine( "[{0}] : {1}", DateTime.Now, e );
+            if (!canceled)
+                Console.WriteLine( "[{0}] : {1}", DateTime.Now, e );
             return 1;
         } finally
         {
@@ -129,20 +134,25 @@ class SimpleListener
         string address = null;
         string port = null;
         string command = null;
+        string arguments = null;
 
         var os = new OptionSet() {
             { "h|?|help", "Display help", v => help = true },
             { "ip", "IP address to listen (default: Any)", v => address = v },
             { "port", "TCP port to listen (default: 16384)", v => port = v },
-            { "command", "The command to execute", v => command = v },
+            { "command=", "The command to execute", v => command = v },
+            { "arguments=", "The arguments to pass to command", v => arguments = v },
         };
         
         try
         {
             os.Parse( args );
             if (help)
+            {
                 ShowHelp( os );
-            
+                return 0;
+            }
+
             var listener = new SimpleListener();
             
             IPAddress ip;
@@ -162,6 +172,7 @@ class SimpleListener
                     using (Process proc = new Process ())
                     {
                         proc.StartInfo.FileName = command;
+                        proc.StartInfo.Arguments = arguments;
                         proc.StartInfo.UseShellExecute = false;
                         proc.StartInfo.RedirectStandardError = true;
                         proc.StartInfo.RedirectStandardOutput = true;
