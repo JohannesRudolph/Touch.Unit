@@ -25,109 +25,11 @@ using System.Text;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-
 using Mono.Options;
 
 // a simple, blocking (i.e. one device/app at the time), listener
-class SimpleListener
+static class Program
 {
-    static byte[] buffer = new byte [16 * 1024];
-    TcpListener server;
-
-    IPAddress Address { get; set; }
-
-    int Port { get; set; }
-
-    bool canceled = false;
-
-    public void Cancel()
-    {
-        try
-        {
-            Console.WriteLine("Canceling the Server");
-            canceled = true;
-            server.Stop();
-        } catch
-        {
-            // We might have stopped already, so just swallow any exceptions.
-        }
-    }
-
-    public void Start()
-    {
-        server = new TcpListener( Address, Port );
-        server.Start();
-        Console.WriteLine( "Touch.Unit Simple Server listening on: {0}:{1}", Address, Port );
-    }
-
-    public int ListenForTestRun()
-    {
-        bool processed = false;
-        try
-        {
-            do
-            {
-                using (TcpClient client = server.AcceptTcpClient ())
-                {
-                    processed = ProcessTestRun( client );
-                }
-            } while (!processed);
-        } catch (Exception e)
-        {
-            if (!canceled)
-                Console.WriteLine( "[{0}] : {1}", DateTime.Now, e );
-            return 1;
-        } finally
-        {
-            server.Stop();
-        }
-        
-        return 0;
-    }
-
-    bool ProcessTestRun( TcpClient client )
-    {
-        string remote = client.Client.RemoteEndPoint.ToString();
-        Console.WriteLine( "Connection from {0}", remote );
-
-        using (var fs = Console.Out)
-        {
-            // a few extra bits of data only available from this side
-            string header = String.Format( "[Local Date/Time:\t{1}]{0}[Remote Address:\t{2}]{0}", 
-                Environment.NewLine, DateTime.Now, remote );
-
-            fs.WriteLine( header );
-            fs.Flush();
-            // now simply copy what we receive
-            int i;
-            int total = 0;
-            NetworkStream stream = client.GetStream();
-
-            do
-            {
-                i = stream.Read( buffer, 0, buffer.Length );
-                fs.Write( fs.Encoding.GetString( buffer, 0, i ) );
-                fs.Flush();
-                total += i;
-            } while (i != 0);
-
-            if (total < 16)
-            {
-                // This wasn't a test run, but a connection from the app (on device) to find
-                // the ip address we're reachable on.
-                return false;
-            }
-        }
-        
-        return true;
-    }
-
-    static void ShowHelp( OptionSet os )
-    {
-        Console.WriteLine( "Usage: mono Touch.Server.exe [options]" );
-        os.WriteOptionDescriptions( Console.Out );
-    }
-
     public static int Main( string[] args )
     { 
         Console.WriteLine( "Touch.Unit Simple Server" );
@@ -139,7 +41,8 @@ class SimpleListener
         string command = null;
         string arguments = null;
 
-        var os = new OptionSet() {
+        var os = new OptionSet()
+        {
             { "h|?|help", "Display help", v => help = true },
             { "ip", "IP address to listen (default: Any)", v => address = v },
             { "port", "TCP port to listen (default: 16384)", v => port = v },
@@ -159,52 +62,76 @@ class SimpleListener
             // launch in background as we will block the main thread with the TCPListener
             if (command == null || arguments == null)
             {
-                Console.Write("command and arguments are required parameters");
+                Console.Write( "command and arguments are required parameters" );
                 return 1;
             }
 
 
-            var listener = new SimpleListener();
-            
-            IPAddress ip;
-            if (String.IsNullOrEmpty( address ) || !IPAddress.TryParse( address, out ip ))
-                listener.Address = IPAddress.Any;
-            
-            ushort p;
-            if (UInt16.TryParse( port, out p ))
-                listener.Port = p;
-            else
-                listener.Port = 16384;
+            IPAddress parsedIp = ParseIp( address );                      
+            ushort parsedPort = ParsePort(port);
 
+            var listener = new SimpleListener(parsedIp, parsedPort);
             listener.Start(); // we start the socket, but do not yet block on it 
 
 
-            var listenerTask = Task.Factory.StartNew(() => listener.ListenForTestRun());
-            var processTask = Task.Factory.StartNew(() => RunProcess(command, arguments, listener));
+            var listenerTask = Task.Factory.StartNew( () => listener.ListenForTestRun() );
+            var processTask = Task.Factory.StartNew( () => RunProcess( command, arguments, listener ) );
            
+            // Wait for the process runner to finish
             processTask.Wait();
-            bool success = listenerTask.Wait(TimeSpan.FromSeconds(2)); // we give the listener 2 more seconds to finish, after that we cancel it no matter what the process returned
+
+            // wait for the listener to exit gracefully
+            bool success = listenerTask.Wait( TimeSpan.FromSeconds( 10 ) ); // we give the listener 10 more seconds to finish, after that we cancel it no matter what the process returned
             if (!success)
             {
-                Console.WriteLine ("Listener did not receive a connection or did not finnish processing in 2 seconds after process exited");
+                Console.WriteLine( "Listener did not receive a connection or did not finnish processing in 10 seconds after process exited" );
                 return 1;
             }
 
-           return listenerTask.Result;
-        } catch (OptionException oe)
+            return listenerTask.Result;
+        }
+        catch (OptionException oe)
         {
             Console.WriteLine( "{0} for options '{1}'", oe.Message, oe.OptionName );
             return 1;
-        } catch (Exception ex)
+        }
+        catch (Exception ex)
         {
             Console.WriteLine( ex );
             return 1;
         }
-    }   
+    }
 
-    static int RunProcess(string command, string arguments, SimpleListener listener)
+    static void ShowHelp( OptionSet os )
     {
-        using (Process proc = new Process ())
+        Console.WriteLine( "Usage: mono Touch.Server.exe [options]" );
+        os.WriteOptionDescriptions( Console.Out );
+    }
+
+    static ushort ParsePort(string port)
+    {
+        ushort p;
+        if (UInt16.TryParse( port, out p ))
+            return p;
+        else
+            return 16384;
+    }
+
+    static IPAddress ParseIp( string address )
+    {
+        IPAddress ip;
+
+        if (String.IsNullOrEmpty( address ) || !IPAddress.TryParse( address, out ip ))
+        {
+            ip = IPAddress.Any;
+        }
+
+        return ip;
+    }
+
+    static int RunProcess( string command, string arguments, SimpleListener listener )
+    {
+        using (Process proc = new Process())
         {
             proc.StartInfo.FileName = command;
             proc.StartInfo.Arguments = arguments;
@@ -212,13 +139,13 @@ class SimpleListener
             proc.StartInfo.RedirectStandardInput = true; // prevent from reading stdin in teamcity builds
             proc.StartInfo.RedirectStandardError = true;
             proc.StartInfo.RedirectStandardOutput = true;
-            proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e )
             {
-                Console.Error.WriteLine( "Command: " + e.Data );
+                Console.Error.WriteLine( "Test-Runner process error: " + e.Data );
             };
-            proc.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            proc.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e )
             {
-                Console.WriteLine( "Command: " + e.Data );
+                Console.WriteLine( "Test-Runner process stdout:" + e.Data );
             };
             proc.Start();
             proc.BeginErrorReadLine();
