@@ -152,11 +152,15 @@ static class Program
             proc.BeginOutputReadLine();
             proc.WaitForExit();
 
+            Console.WriteLine( "Test-Runner process exited with code {0} after {1}s", proc.ExitCode, (proc.ExitTime - proc.StartTime).TotalSeconds );
+
             // cancel the listener task if the process failed
             if (proc.ExitCode != 0)
                 listener.Cancel();
 
             return proc.ExitCode;
         }
+
+
     }
 }

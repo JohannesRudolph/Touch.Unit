@@ -93,14 +93,14 @@ class SimpleListener
         string remote = client.Client.RemoteEndPoint.ToString();
         Console.WriteLine( "Connection from {0}", remote );
 
-        using (var fs = Console.Out)
+        var output = Console.Out;
         {
             // a few extra bits of data only available from this side
-            string header = String.Format( "[Local Date/Time:\t{1}]{0}[Remote Address:\t{2}]{0}", 
-                                Environment.NewLine, DateTime.Now, remote );
+            string header = String.Format( "[Local Date/Time:\t{1}]{0}[Remote Address:\t{2}]{0}", Environment.NewLine, DateTime.Now, remote );
 
-            fs.WriteLine( header );
-            fs.Flush();
+            output.WriteLine( header );
+            output.Flush();
+
             // now simply copy what we receive
             int i;
             int total = 0;
@@ -109,8 +109,8 @@ class SimpleListener
             do
             {
                 i = stream.Read( _receiveBuffer, 0, _receiveBuffer.Length );
-                fs.Write( fs.Encoding.GetString( _receiveBuffer, 0, i ) );
-                fs.Flush();
+                output.Write( output.Encoding.GetString( _receiveBuffer, 0, i ) );
+                output.Flush();
                 total += i;
             } while (i != 0);
 
