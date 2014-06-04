@@ -63,16 +63,13 @@ class SimpleListener
 
     public int ListenForTestRun()
     {
-        bool processed = false;
         try
         {
-            do
+            using (TcpClient client = _tcp.AcceptTcpClient())
             {
-                using (TcpClient client = _tcp.AcceptTcpClient())
-                {
-                    processed = ProcessTestRun( client );
-                }
-            } while (!processed);
+                ProcessTestRun( client );
+            }
+           
         }
         catch (Exception e)
         {
@@ -88,8 +85,14 @@ class SimpleListener
         return 0;
     }
 
-    bool ProcessTestRun( TcpClient client )
+    void ProcessTestRun( TcpClient client )
     {
+        var timeout = new System.Threading.Timer( _ => 
+        {
+            Console.WriteLine( "Timeout waiting for test-runner output for 10 seconds. Looks like the runner process has tied (if not, it should send heartbeats)." );
+            Cancel();
+        }, null, TimeSpan.FromSeconds( 10 ), TimeSpan.Zero );
+
         string remote = client.Client.RemoteEndPoint.ToString();
         Console.WriteLine( "Connection from {0}", remote );
 
@@ -109,19 +112,12 @@ class SimpleListener
             do
             {
                 i = stream.Read( _receiveBuffer, 0, _receiveBuffer.Length );
+                timeout.Change(TimeSpan.FromSeconds( 10 ), TimeSpan.Zero );
+
                 output.Write( output.Encoding.GetString( _receiveBuffer, 0, i ) );
                 output.Flush();
                 total += i;
             } while (i != 0);
-
-            if (total < 16)
-            {
-                // This wasn't a test run, but a connection from the app (on device) to find
-                // the ip address we're reachable on.
-                return false;
-            }
         }
-
-        return true;
     }
 }

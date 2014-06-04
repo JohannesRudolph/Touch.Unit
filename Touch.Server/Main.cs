@@ -81,12 +81,7 @@ static class Program
             processTask.Wait();
 
             // wait for the listener to exit gracefully
-            bool success = listenerTask.Wait( TimeSpan.FromSeconds( 10 ) ); // we give the listener 10 more seconds to finish, after that we cancel it no matter what the process returned
-            if (!success)
-            {
-                Console.WriteLine( "Listener did not receive a connection or did not finnish processing in 10 seconds after process exited" );
-                return 1;
-            }
+            listenerTask.Wait();
 
             return listenerTask.Result;
         }
