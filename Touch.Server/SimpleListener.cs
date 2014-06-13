@@ -30,13 +30,16 @@ using Mono.Options;
 // a simple, blocking (i.e. one device/app at the time), listener
 class SimpleListener
 {
-    static byte[] _receiveBuffer = new byte [16 * 1024];
-    TcpListener _tcp;
+    readonly byte[] _receiveBuffer = new byte [16 * 1024];
+    readonly TcpListener _tcp;
+    readonly TimeSpan _silenceTimeout;
+    NetworkStream _currentStream;
 
-    public SimpleListener( IPAddress address, int port )
+    public SimpleListener( IPAddress address, int port, TimeSpan silenceTimeout )
     {
         Console.WriteLine( "Touch.Unit Simple Server configured for : {0}:{1}", address, port );
         _tcp = new TcpListener( address, port );
+        _silenceTimeout = silenceTimeout;
     }
 
     bool canceled = false;
@@ -48,6 +51,8 @@ class SimpleListener
             Console.WriteLine( "Canceling the Server" );
             canceled = true;
             _tcp.Stop();
+            _currentStream.Dispose();
+
         }
         catch
         {
@@ -89,33 +94,50 @@ class SimpleListener
     {
         var timeout = new System.Threading.Timer( _ => 
         {
-            Console.WriteLine( "Timeout waiting for test-runner output for 10 seconds. Looks like the runner process has tied (if not, it should send heartbeats)." );
+            Console.WriteLine( "Timeout waiting for test-runner output for 10 seconds. Looks like the runner process has died (if not, it should send heartbeats)." );
             Cancel();
-        }, null, TimeSpan.FromSeconds( 10 ), TimeSpan.Zero );
+        }, null, _silenceTimeout, TimeSpan.Zero );
 
         string remote = client.Client.RemoteEndPoint.ToString();
         Console.WriteLine( "Connection from {0}", remote );
 
-        var output = Console.Out;
+        var received = new StringBuilder();
         {
             // a few extra bits of data only available from this side
             string header = String.Format( "[Local Date/Time:\t{1}]{0}[Remote Address:\t{2}]{0}", Environment.NewLine, DateTime.Now, remote );
 
-            output.WriteLine( header );
-            output.Flush();
+            Console.Out.WriteLine( header );
+            Console.Out.Flush();
 
             // now simply copy what we receive
             int i;
             int total = 0;
-            NetworkStream stream = client.GetStream();
+            _currentStream = client.GetStream();
 
             do
             {
-                i = stream.Read( _receiveBuffer, 0, _receiveBuffer.Length );
-                timeout.Change(TimeSpan.FromSeconds( 10 ), TimeSpan.Zero );
+                i = _currentStream.Read( _receiveBuffer, 0, _receiveBuffer.Length );
+                bool didNotSendAnyDataSoAssumeFinished = i == 0;
+                if (didNotSendAnyDataSoAssumeFinished)
+                    return;
 
-                output.Write( output.Encoding.GetString( _receiveBuffer, 0, i ) );
-                output.Flush();
+                timeout.Change(_silenceTimeout, TimeSpan.Zero );
+
+                var str = Console.Out.Encoding.GetString( _receiveBuffer, 0, i );
+
+                Console.Out.Write( str );
+                Console.Out.Flush();
+
+                // this is ugly but should work
+                received.Append(str);
+                bool hasFinished = received.ToString().Contains( "testSuiteFinished" );
+                if (hasFinished)
+                {
+                    Console.Out.WriteLine("Detected end of tests, exiting listener");
+                    return;
+                }
+                    
+
                 total += i;
             } while (i != 0);
         }

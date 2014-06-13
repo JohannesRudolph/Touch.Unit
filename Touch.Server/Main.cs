@@ -66,23 +66,32 @@ static class Program
                 return 1;
             }
 
-
             IPAddress parsedIp = ParseIp( address );                      
             ushort parsedPort = ParsePort(port);
 
-            var listener = new SimpleListener(parsedIp, parsedPort);
-            listener.Start(); // we start the socket, but do not yet block on it 
-
-
-            var listenerTask = Task.Factory.StartNew( () => listener.ListenForTestRun() );
-            var processTask = Task.Factory.StartNew( () => RunProcess( command, arguments, listener ) );
+            var runnerCancellation = new CancellationTokenSource();
+            Task<int> listenerTask = StartListener( parsedIp, parsedPort, TimeSpan.FromSeconds(10) );
+            Task<int> runnerTask = StartTestRunner(command, arguments, runnerCancellation.Token);
            
             // Wait for the process runner to finish
-            processTask.Wait();
+            Task.WaitAny(listenerTask, runnerTask);
 
-            // wait for the listener to exit gracefully
+            bool runnerCompletedWithError = runnerTask.IsCompleted && runnerTask.Result != 0;
+            if (runnerCompletedWithError)
+            {
+                // when the runner completes with an error (e.g. adb timeout), ignore this an observe what the listener has to say
+                return listenerTask.Result; 
+            }
+                
+            // wait for the listener to complete
             listenerTask.Wait();
 
+            // if the runner task hasn't finished by now we need to kill it, and wait for it to be killed
+            // http://stackoverflow.com/questions/1491674/when-a-parent-process-is-killed-by-kill-9-will-subprocess-also-be-killed
+            runnerCancellation.Cancel();
+            runnerTask.Wait();
+
+            // return the listener status
             return listenerTask.Result;
         }
         catch (OptionException oe)
@@ -101,6 +110,64 @@ static class Program
     {
         Console.WriteLine( "Usage: mono Touch.Server.exe [options]" );
         os.WriteOptionDescriptions( Console.Out );
+    }
+
+    static Task<int> StartListener( IPAddress parsedIp, ushort parsedPort, TimeSpan silenceTimeout )
+    {
+        var listener = new SimpleListener( parsedIp, parsedPort, silenceTimeout );
+        listener.Start();
+
+        // we start the socket, but do not yet block on it 
+        return Task.Factory.StartNew( () => listener.ListenForTestRun() );
+    }
+
+    static Task<int> StartTestRunner( string command, string arguments, CancellationToken cancel )
+    {
+        return Task.Run( async () => await RunProcessAsync( command, arguments, cancel ) );
+    }
+
+    static async Task<int> RunProcessAsync( string command, string arguments, CancellationToken cancel )
+    {
+        // we only use async to get this thing wrapped up in a task
+        await Task.FromResult( 0 );
+
+        using (Process proc = new Process())
+        {
+            proc.StartInfo.FileName = command;
+            proc.StartInfo.Arguments = arguments;
+            proc.StartInfo.UseShellExecute = false;
+            proc.StartInfo.RedirectStandardInput = true; // prevent from reading stdin in teamcity builds
+            proc.StartInfo.RedirectStandardError = true;
+            proc.StartInfo.RedirectStandardOutput = true;
+            proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e )
+            {
+                Console.Error.WriteLine( "Test-Runner process error: " + e.Data );
+            };
+            proc.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e )
+            {
+                Console.WriteLine( "Test-Runner process stdout:" + e.Data );
+            };
+            proc.Start();
+            proc.BeginErrorReadLine();
+            proc.BeginOutputReadLine();
+
+            bool hasExited = false;
+            while (!hasExited)
+            {
+                if (cancel.IsCancellationRequested)
+                {
+                    proc.Kill();
+                    Console.WriteLine( "Test-Runner process cancelled" );
+                    return -1;
+                }
+
+                hasExited = proc.WaitForExit( 100 );
+            }
+
+            Console.WriteLine( "Test-Runner process exited with code {0} after {1}s", proc.ExitCode, (proc.ExitTime - proc.StartTime).TotalSeconds );
+
+            return proc.ExitCode;
+        }
     }
 
     static ushort ParsePort(string port)
@@ -124,38 +191,4 @@ static class Program
         return ip;
     }
 
-    static int RunProcess( string command, string arguments, SimpleListener listener )
-    {
-        using (Process proc = new Process())
-        {
-            proc.StartInfo.FileName = command;
-            proc.StartInfo.Arguments = arguments;
-            proc.StartInfo.UseShellExecute = false;
-            proc.StartInfo.RedirectStandardInput = true; // prevent from reading stdin in teamcity builds
-            proc.StartInfo.RedirectStandardError = true;
-            proc.StartInfo.RedirectStandardOutput = true;
-            proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e )
-            {
-                Console.Error.WriteLine( "Test-Runner process error: " + e.Data );
-            };
-            proc.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e )
-            {
-                Console.WriteLine( "Test-Runner process stdout:" + e.Data );
-            };
-            proc.Start();
-            proc.BeginErrorReadLine();
-            proc.BeginOutputReadLine();
-            proc.WaitForExit();
-
-            Console.WriteLine( "Test-Runner process exited with code {0} after {1}s", proc.ExitCode, (proc.ExitTime - proc.StartTime).TotalSeconds );
-
-            // cancel the listener task if the process failed
-            if (proc.ExitCode != 0)
-                listener.Cancel();
-
-            return proc.ExitCode;
-        }
-
-
-    }
 }
