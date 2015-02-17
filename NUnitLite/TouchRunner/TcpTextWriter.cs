@@ -6,7 +6,7 @@ using System.IO;
 using System.Net.Sockets;
 using System.Text;
 
-using MonoTouch.UIKit;
+using UIKit;
 
 namespace MonoTouch.NUnit {
 

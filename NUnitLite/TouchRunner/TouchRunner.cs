@@ -27,9 +27,9 @@ using System.Reflection;
 using System.Threading;
 
 using MonoTouch.Dialog;
-using MonoTouch.Foundation;
-using MonoTouch.ObjCRuntime;
-using MonoTouch.UIKit;
+using Foundation;
+using ObjCRuntime;
+using UIKit;
 
 using NUnit.Framework.Api;
 using NUnit.Framework.Internal;
@@ -256,7 +256,7 @@ namespace MonoTouch.NUnit.UI {
 								null, "Cancel", "Continue");
 							int button = -1;
 							alert.Clicked += delegate(object sender, UIButtonEventArgs e) {
-								button = e.ButtonIndex;
+								button = (int)e.ButtonIndex;
 							};
 							alert.Show ();
 							while (button == -1)
@@ -275,11 +275,10 @@ namespace MonoTouch.NUnit.UI {
 			}
 			
 			Writer.WriteLine ("[Runner executing:\t{0}]", message);
-			Writer.WriteLine ("[MonoTouch Version:\t{0}]", MonoTouch.Constants.Version);
+			Writer.WriteLine ("[MonoTouch Version:\t{0}]", Constants.Version);
 			UIDevice device = UIDevice.CurrentDevice;
 			Writer.WriteLine ("[{0}:\t{1} v{2}]", device.Model, device.SystemName, device.SystemVersion);
 			Writer.WriteLine ("[Device Name:\t{0}]", device.Name);
-			Writer.WriteLine ("[Device UDID:\t{0}]", device.UniqueIdentifier);
 			Writer.WriteLine ("[Device Date/Time:\t{0}]", now); // to match earlier C.WL output
 
 			Writer.WriteLine ("[Bundle:\t{0}]", NSBundle.MainBundle.BundleIdentifier);
@@ -373,14 +372,15 @@ namespace MonoTouch.NUnit.UI {
 			return true;
 		}
 
+
 		public TestResult Run (Test test)
-		{
+		{;
 			TestExecutionContext current = TestExecutionContext.CurrentContext;
 			current.WorkDirectory = Environment.CurrentDirectory;
 			current.Listener = this;
-			current.TestObject = test is TestSuite ? null : Reflect.Construct ((test as TestMethod).Method.ReflectedType, null);
-			WorkItem wi = WorkItem.CreateWorkItem (test, current, filter);
-			wi.Execute ();
+			WorkItem wi = test.CreateWorkItem (filter);
+			wi.Execute (current);
+
 			return wi.Result;
 		}
 

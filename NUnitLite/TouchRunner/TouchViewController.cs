@@ -20,11 +20,11 @@
 
 using System;
 using System.Collections.Generic;
-using System.Drawing;
+using CoreGraphics;
 
-using MonoTouch.CoreGraphics;
-using MonoTouch.Foundation;
-using MonoTouch.UIKit;
+using CoreGraphics;
+using Foundation;
+using UIKit;
 using MonoTouch.Dialog;
 
 namespace MonoTouch.NUnit.UI {
@@ -247,7 +247,7 @@ namespace MonoTouch.NUnit.UI {
 			// https://developer.apple.com/library/ios/#documentation/UserExperience/Conceptual/MobileHIG/IconsImages/IconsImages.html
 			// http://tirania.org/blog/archive/2010/Jul-20-2.html
 			float size = 20f;
-			UIGraphics.BeginImageContextWithOptions (new SizeF (size, size), false, 0);
+			UIGraphics.BeginImageContextWithOptions (new CGSize (size, size), false, 0);
 			using (var c = UIGraphics.GetCurrentContext ()) {
 				c.SetFillColor (1.0f, 1.0f, 1.0f, 1.0f);
 				c.SetStrokeColor (1.0f, 1.0f, 1.0f, 1.0f);

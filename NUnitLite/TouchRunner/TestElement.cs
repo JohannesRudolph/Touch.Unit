@@ -20,7 +20,7 @@
 
 using System;
 using MonoTouch.Dialog;
-using MonoTouch.UIKit;
+using UIKit;
 
 using NUnit.Framework.Internal;
 using NUnit.Framework.Api;
